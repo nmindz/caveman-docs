@@ -1,0 +1,15 @@
+description = "Switch caveman-docs intensity (lite/full/ultra/ultimate/wenyan-lite/wenyan/wenyan-ultra/wenyan-ultimate/off)"
+prompt = """Switch caveman-docs to {{args}} mode.
+
+Levels:
+- lite — drop filler/hedging, keep grammar
+- full — drop articles, fragments OK (default)
+- ultra — max compression, abbreviate, telegraphic (AI docs only)
+- ultimate — ultra + intercept ANY .md file (every path/type) for caveman compression
+- wenyan-lite — semi-classical Chinese, grammar intact
+- wenyan / wenyan-full — full 文言文, max classical terseness
+- wenyan-ultra — extreme classical compression (AI docs only)
+- wenyan-ultimate — wenyan-ultra + intercept ANY .md file
+- off — disable
+
+The /caveman-docs UserPromptSubmit hook persists the mode in the flag file. Confirm the active level back to the user. Apply the mode immediately to subsequent docs."""

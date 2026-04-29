@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 // caveman-docs — PreToolUse hook for Write and Edit tools
-// Detects when a Write/Edit targets an AI doc file and injects a compression reminder.
-// Fired for tool_name: Write, Edit
+// Injects compression reminder when:
+//   - target is an AI doc (always, when caveman-docs is active), OR
+//   - active mode is ULTIMATE / WENYAN-ULTIMATE → ANY .md file (path/type-agnostic).
+// Exempts README.md, CHANGELOG.md, CONTRIBUTING.md in all modes.
 
-const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const {
+  getDefaultMode,
+  getFlagPath,
+  readFlag,
+  ULTIMATE_MODES,
+  ruleFragmentFor
+} = require('./caveman-docs-config');
 
-const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-const flagPath = path.join(claudeDir, '.caveman-docs-active');
+const flagPath = getFlagPath();
 
-// AI doc path patterns — relative segment match (no full-path requirement)
 const AI_DOC_PATTERNS = [
   /\bAGENTS\.md$/i,
   /\bCLAUDE\.md$/i,
@@ -23,18 +28,24 @@ const AI_DOC_PATTERNS = [
   /\b\.windsurf[/\\]rules[/\\][^/\\]+\.md$/i,
 ];
 
-// Human-facing doc patterns — exempt even if path looks like AI doc
 const HUMAN_DOC_PATTERNS = [
   /\bREADME\.md$/i,
   /\bCHANGELOG\.md$/i,
   /\bCONTRIBUTING\.md$/i,
 ];
 
-function isAIDoc(filePath) {
-  if (!filePath) return false;
-  const normalized = filePath.replace(/\\/g, '/');
-  if (HUMAN_DOC_PATTERNS.some(p => p.test(normalized))) return false;
-  return AI_DOC_PATTERNS.some(p => p.test(normalized));
+function isHumanDoc(p) {
+  return HUMAN_DOC_PATTERNS.some(r => r.test(p));
+}
+
+function isAIDoc(p) {
+  if (!p) return false;
+  if (isHumanDoc(p)) return false;
+  return AI_DOC_PATTERNS.some(r => r.test(p));
+}
+
+function isMarkdown(p) {
+  return /\.(md|markdown)$/i.test(p);
 }
 
 let input = '';
@@ -45,43 +56,35 @@ process.stdin.on('end', () => {
     const toolName = data.tool_name || data.tool || '';
     const toolInput = data.tool_input || data.input || {};
 
-    // Only act on Write and Edit
-    if (!/^(Write|Edit)$/i.test(toolName)) {
-      process.exit(0);
-    }
+    if (!/^(Write|Edit|MultiEdit)$/i.test(toolName)) process.exit(0);
 
-    const filePath = toolInput.file_path || toolInput.path || '';
+    const filePath = (toolInput.file_path || toolInput.path || '').replace(/\\/g, '/');
+    if (!filePath) process.exit(0);
 
-    if (!isAIDoc(filePath)) {
-      process.exit(0);
-    }
+    const mode = readFlag(flagPath) || getDefaultMode();
+    if (mode === 'off') process.exit(0);
 
-    // Check flag — only inject if caveman-docs is active
-    // (always active after SessionStart, but respect manual deactivation)
-    let flagActive = true;
-    try {
-      const st = fs.lstatSync(flagPath);
-      if (!st.isFile()) flagActive = false;
-    } catch (e) {
-      // Flag missing means not installed in this session — still inject since
-      // the SessionStart hook may have been installed without the flag mechanism
-      flagActive = true;
-    }
+    const aiDoc = isAIDoc(filePath);
+    const ultimate = ULTIMATE_MODES.has(mode);
+    const anyMd = ultimate && isMarkdown(filePath) && !isHumanDoc(filePath);
 
-    if (!flagActive) {
-      process.exit(0);
-    }
+    if (!aiDoc && !anyMd) process.exit(0);
 
     const fileName = path.basename(filePath);
+    const scopeNote = aiDoc
+      ? `"${fileName}" is an AI doc file.`
+      : `"${fileName}" is a Markdown file. ULTIMATE mode (${mode}) compresses every .md write.`;
+
     const reminder =
-      `CAVEMAN-DOCS: "${fileName}" is an AI doc file. Apply compression rules:\n` +
+      `CAVEMAN-DOCS (${mode}): ${scopeNote} Apply compression:\n` +
+      `${ruleFragmentFor(mode)}\n` +
       `- No meta-prose (heading states topic, body delivers facts)\n` +
       `- Bullets > paragraphs. Tables > lists for tabular data.\n` +
-      `- No hedging words (typically/usually/generally/note that/please be aware)\n` +
+      `- No hedging (typically/usually/generally/note that/please be aware)\n` +
       `- Active voice, imperative mood\n` +
       `- Numbers as digits\n` +
       `- Code blocks verbatim and exact\n` +
-      `Exempt (write normally): Confluence, Jira, README.md, PR descriptions, CHANGELOG.md.`;
+      `Exempt (write normally): README.md, CHANGELOG.md, CONTRIBUTING.md, Confluence, Jira, PR descriptions.`;
 
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {

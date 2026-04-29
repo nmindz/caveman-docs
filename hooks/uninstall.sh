@@ -25,6 +25,14 @@ for dir in "$HOOKS_DIR" "$COMMANDS_DIR" "$SKILLS_DIR"; do
   fi
 done
 
+# Top-level slash command file
+for f in "$CLAUDE_DIR/commands/caveman-docs.toml" "$CLAUDE_DIR/commands/caveman-docs.md"; do
+  if [ -f "$f" ]; then
+    rm -f "$f"
+    echo "  Removed: $f"
+  fi
+done
+
 # Remove agent (only if it was installed by caveman-docs)
 if [ -f "$CLAUDE_DIR/agents/doc-compressor.md" ]; then
   rm -f "$CLAUDE_DIR/agents/doc-compressor.md"

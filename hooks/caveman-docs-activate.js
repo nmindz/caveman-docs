@@ -1,19 +1,34 @@
 #!/usr/bin/env node
 // caveman-docs — SessionStart activation hook
-// Emits the caveman-docs ruleset as system context every session.
-// Shapes AI doc output for Write/Edit on AGENTS.md, CLAUDE.md, docs/agents/*.md, SKILL.md, etc.
+// Emits the caveman-docs ruleset as system context every session, scoped to the active mode.
+// Mode resolved from flag file → env (CAVEMAN_DOCS_DEFAULT_MODE / CAVEMAN_DEFAULT_MODE) → config → 'full'.
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const {
+  getDefaultMode,
+  getFlagPath,
+  safeWriteFlag,
+  clearFlag,
+  ULTIMATE_MODES,
+  ULTRA_CLASS,
+  ruleFragmentFor
+} = require('./caveman-docs-config');
 
-const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-const flagPath = path.join(claudeDir, '.caveman-docs-active');
+const flagPath = getFlagPath();
+const mode = getDefaultMode();
 
-// Write flag (symlink-safe)
-safeWriteFlag(flagPath, 'active');
+// "off" — skip activation entirely
+if (mode === 'off') {
+  clearFlag(flagPath);
+  process.stdout.write('OK');
+  process.exit(0);
+}
 
-// Read SKILL.md
+// Persist resolved mode so other hooks (tracker, pre-write) read consistently.
+safeWriteFlag(flagPath, mode);
+
+// Read SKILL.md as source of truth
 let skillContent = '';
 try {
   skillContent = fs.readFileSync(
@@ -21,14 +36,25 @@ try {
   );
 } catch (e) { /* fallback below */ }
 
+const modeRule = ruleFragmentFor(mode);
+const isUltimate = ULTIMATE_MODES.has(mode);
+const isUltra = ULTRA_CLASS.has(mode);
+
+const ultimateNotice = isUltimate
+  ? '\n\nULTIMATE INTERCEPTION ACTIVE: every .md write in this session — any path, any type — is compressed via caveman rules. Exempt: README.md, CHANGELOG.md, CONTRIBUTING.md.'
+  : '';
+
 let output;
 if (skillContent) {
-  // Strip YAML frontmatter
   const body = skillContent.replace(/^---[\s\S]*?---\s*/, '');
-  output = 'CAVEMAN-DOCS ACTIVE — AI documentation will be written compressed.\n\n' + body;
+  output =
+    'CAVEMAN-DOCS ACTIVE — level: ' + mode + '\n' +
+    modeRule + ultimateNotice + '\n\n' +
+    body;
 } else {
   output =
-    'CAVEMAN-DOCS ACTIVE\n\n' +
+    'CAVEMAN-DOCS ACTIVE — level: ' + mode + '\n' +
+    modeRule + ultimateNotice + '\n\n' +
     'When writing AI-oriented docs (AGENTS.md, CLAUDE.md, docs/agents/*.md, SKILL.md,\n' +
     'agents/*.md, commands/*.md): compress to max density.\n\n' +
     'Rules:\n' +
@@ -42,35 +68,3 @@ if (skillContent) {
 }
 
 process.stdout.write(output);
-
-function safeWriteFlag(flagPath, content) {
-  try {
-    const flagDir = path.dirname(flagPath);
-    fs.mkdirSync(flagDir, { recursive: true });
-
-    try {
-      if (fs.lstatSync(flagDir).isSymbolicLink()) return;
-    } catch (e) { return; }
-
-    try {
-      if (fs.lstatSync(flagPath).isSymbolicLink()) return;
-    } catch (e) {
-      if (e.code !== 'ENOENT') return;
-    }
-
-    const tempPath = path.join(flagDir, `.caveman-docs-active.${process.pid}.${Date.now()}`);
-    const O_NOFOLLOW = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
-    const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW;
-    let fd;
-    try {
-      fd = fs.openSync(tempPath, flags, 0o600);
-      fs.writeSync(fd, String(content));
-      try { fs.fchmodSync(fd, 0o600); } catch (e) {}
-    } finally {
-      if (fd !== undefined) fs.closeSync(fd);
-    }
-    fs.renameSync(tempPath, flagPath);
-  } catch (e) {
-    // Silent fail — flag is best-effort
-  }
-}

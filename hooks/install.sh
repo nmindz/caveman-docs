@@ -26,7 +26,7 @@ SKILLS_DIR="$CLAUDE_DIR/skills/caveman-docs"
 AGENTS_DIR="$CLAUDE_DIR/agents"
 SETTINGS="$CLAUDE_DIR/settings.json"
 
-HOOK_FILES=("package.json" "caveman-docs-activate.js" "caveman-docs-tracker.js" "caveman-docs-pre-write.js")
+HOOK_FILES=("package.json" "caveman-docs-config.js" "caveman-docs-activate.js" "caveman-docs-tracker.js" "caveman-docs-pre-write.js")
 
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -90,12 +90,20 @@ for hook in "${HOOK_FILES[@]}"; do
   echo "  Installed: $HOOKS_DIR/$hook"
 done
 
-# 2. Commands → ~/.claude/commands/caveman-docs/
+# 2. Commands → ~/.claude/commands/caveman-docs/ (namespaced)
+#    Exception: caveman-docs.toml ships at ~/.claude/commands/caveman-docs.toml so
+#    the slash command resolves as /caveman-docs <level> (top-level, not namespaced).
 mkdir -p "$COMMANDS_DIR"
 for cmd in "$REPO_DIR"/commands/*.md "$REPO_DIR"/commands/*.toml; do
   [ -f "$cmd" ] || continue
-  cp "$cmd" "$COMMANDS_DIR/$(basename "$cmd")"
-  echo "  Installed: $COMMANDS_DIR/$(basename "$cmd")"
+  base="$(basename "$cmd")"
+  if [ "$base" = "caveman-docs.toml" ] || [ "$base" = "caveman-docs.md" ]; then
+    cp "$cmd" "$CLAUDE_DIR/commands/$base"
+    echo "  Installed: $CLAUDE_DIR/commands/$base (top-level slash)"
+  else
+    cp "$cmd" "$COMMANDS_DIR/$base"
+    echo "  Installed: $COMMANDS_DIR/$base"
+  fi
 done
 
 # 3. Skill → ~/.claude/skills/caveman-docs/
@@ -188,10 +196,12 @@ echo "  Hooks:"
 echo "    - SessionStart        → caveman-docs-activate.js   (injects rules every session)"
 echo "    - UserPromptSubmit    → caveman-docs-tracker.js    (detects AI doc write intent)"
 echo "    - PreToolUse Write|Edit → caveman-docs-pre-write.js (fires on AI doc paths)"
-echo "  Commands (in $COMMANDS_DIR):"
+echo "  Commands:"
+echo "    - /caveman-docs <level>     — switch mode (lite/full/ultra/ultimate/wenyan*/off)"
 echo "    - /caveman-docs:init        — generate AGENTS.md + CLAUDE.md"
 echo "    - /caveman-docs:ai-context  — generate full tree (+ docs/agents/*.md)"
 echo "    - /caveman-docs:compress    — compress staged/unstaged AI docs in place"
+echo "  Mode resolution: flag file > CAVEMAN_DOCS_DEFAULT_MODE > CAVEMAN_DEFAULT_MODE > config > 'full'"
 echo "  Skill:  $SKILLS_DIR/SKILL.md"
 echo "  Agent:  $AGENTS_DIR/doc-compressor.md"
 echo ""

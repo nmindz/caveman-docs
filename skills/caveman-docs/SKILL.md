@@ -5,6 +5,8 @@ description: >
   docs (AGENTS.md, CLAUDE.md, docs/agents/*.md, SKILL.md, agents/*.md,
   commands/*.md), compress content to maximum density. No filler prose.
   Bullets over paragraphs. Tables over lists. Facts only.
+  Supports intensity levels: lite, full (default), ultra, ultimate,
+  wenyan-lite, wenyan, wenyan-ultra, wenyan-ultimate.
   Human-facing docs (Confluence, Jira, README, PR descriptions) are EXEMPT.
 ---
 
@@ -165,6 +167,48 @@ src/
 Bad: "This skill provides guidance for working with the authentication module in this repository, helping AI agents understand the patterns and conventions used."
 
 Good: "Auth module patterns — JWT flow, token refresh, permission guards. Use when modifying auth/* files."
+
+## Intensity Levels
+
+| Level | Effect | Scope |
+|-------|--------|-------|
+| `lite` | Drop filler/hedging/pleasantries. Keep articles + full sentences | AI docs |
+| `full` (default) | Drop articles, fragments OK, short synonyms | AI docs |
+| `ultra` | Max compression. Abbreviate (DB/auth/config/req/res/fn/impl). Strip conjunctions. Arrows for causality (X → Y) | AI docs |
+| `ultimate` | Same as `ultra` PLUS intercept ANY `.md` write (any path/type) | All `.md` (except exempt list) |
+| `wenyan-lite` | Semi-classical Chinese. Grammar intact, filler gone | AI docs |
+| `wenyan` / `wenyan-full` | Full 文言文. Max classical terseness. 80-90% character reduction. Particles 之/乃/為/其 | AI docs |
+| `wenyan-ultra` | Extreme classical compression. Ancient scholar on a budget | AI docs |
+| `wenyan-ultimate` | Same as `wenyan-ultra` PLUS intercept ANY `.md` write | All `.md` (except exempt list) |
+| `off` | Disable | — |
+
+### Mode resolution order
+1. Flag file `~/.claude/.caveman-docs-active` (set by `/caveman-docs <level>`)
+2. `CAVEMAN_DOCS_DEFAULT_MODE` env var
+3. `CAVEMAN_DEFAULT_MODE` env var (shared with upstream `caveman` plugin)
+4. `~/.config/caveman-docs/config.json` `defaultMode` field
+5. `full`
+
+### Switch mid-session
+- `/caveman-docs lite|full|ultra|ultimate|wenyan-lite|wenyan|wenyan-ultra|wenyan-ultimate|off`
+- Bare `/caveman-docs` → re-resolve from env/config
+
+### ULTIMATE behavior (`ultimate`, `wenyan-ultimate`)
+- PreToolUse Write/Edit/MultiEdit fires on every `.md` (and `.markdown`) write — not only AI doc paths
+- Exempt: `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, Confluence, Jira, PR descriptions, commit messages
+- Non-`.md` files (`.ts`, `.js`, `.py`, etc.) untouched
+
+### Compression by level — same input, different output
+Input: "Component re-renders because a new object reference is created on each render."
+
+| Level | Output |
+|-------|--------|
+| `lite` | "Component re-renders due to new object reference each render." |
+| `full` | "New object ref each render → re-render." |
+| `ultra` | "Inline obj prop → new ref → re-render." |
+| `wenyan-lite` | "組件頻重繪，以每繪新生對象參照故。" |
+| `wenyan` | "物出新參照，致重繪。" |
+| `wenyan-ultra` | "新參照→重繪。" |
 
 ## Auto-Clarity Exception
 

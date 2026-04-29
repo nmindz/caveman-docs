@@ -10,6 +10,7 @@
 | 2 | [Code Style & Project Conventions](#2-code-style--project-conventions) |
 | 3 | [Agent Communication & Behavioral Guidelines](#3-agent-communication--behavioral-guidelines) |
 | 4 | [Setup, Troubleshooting and Tips](#4-setup-troubleshooting-and-tips) |
+| 4a | [Mode Levels](#4a-mode-levels) |
 | 5 | [References](#5-references) |
 | 6 | [Agent Documentation](#6-agent-documentation) |
 
@@ -17,12 +18,13 @@
 
 | Command | Purpose |
 |---------|---------|
-| `bash hooks/install.sh` | Install 3 hooks + commands + skill + agent into `~/.claude` |
+| `bash hooks/install.sh` | Install 3 hooks + config + commands + skill + agent into `~/.claude` |
 | `bash hooks/install.sh --force` | Reinstall, overwrite existing files |
 | `bash hooks/uninstall.sh` | Remove hooks from `~/.claude/settings.json` |
-| `node hooks/caveman-docs-activate.js` | Manual run: emit SKILL.md body (SessionStart payload) |
-| `node hooks/caveman-docs-tracker.js` | Manual run: feed JSON prompt on stdin to test intent detection |
-| `node hooks/caveman-docs-pre-write.js` | Manual run: feed JSON tool-call on stdin to test AI doc path match |
+| `node hooks/caveman-docs-activate.js` | Manual run: emit mode-scoped SKILL.md body (SessionStart payload) |
+| `node hooks/caveman-docs-tracker.js` | Manual run: feed JSON prompt on stdin to test slash + intent detection |
+| `node hooks/caveman-docs-pre-write.js` | Manual run: feed JSON tool-call on stdin to test path match |
+| `CAVEMAN_DEFAULT_MODE=ultimate node hooks/caveman-docs-activate.js` | Verify mode resolution + ULTIMATE notice |
 
 No test runner. Validation via `test -f`, `grep`, `wc`.
 
@@ -71,6 +73,34 @@ Restart Claude Code after install — hooks register at SessionStart.
 | Compression not applied to AI doc | Confirm path matches patterns in `hooks/caveman-docs-pre-write.js:14-24` |
 | `node` not found during install | Install Node.js; required at `hooks/install.sh:17` |
 | Settings corrupted | Restore from `~/.claude/settings.json.caveman-docs.bak` |
+
+## 4a. Mode Levels
+
+| Level | Effect | Scope |
+|-------|--------|-------|
+| `lite` | Drop filler/hedging. Keep articles | AI docs |
+| `full` (default) | Drop articles, fragments OK | AI docs |
+| `ultra` | Max compression, abbreviations, arrows | AI docs |
+| `ultimate` | `ultra` + intercept ANY `.md` write | All `.md` (exempt: README/CHANGELOG/CONTRIBUTING) |
+| `wenyan-lite` | Semi-classical Chinese | AI docs |
+| `wenyan` / `wenyan-full` | Full 文言文 | AI docs |
+| `wenyan-ultra` | Extreme classical | AI docs |
+| `wenyan-ultimate` | `wenyan-ultra` + intercept ANY `.md` write | All `.md` (exempt: README/CHANGELOG/CONTRIBUTING) |
+| `off` | Disable | — |
+
+### Mode resolution order (`hooks/caveman-docs-config.js:69`)
+1. Flag file `~/.claude/.caveman-docs-active`
+2. `CAVEMAN_DOCS_DEFAULT_MODE` env
+3. `CAVEMAN_DEFAULT_MODE` env (shared with upstream `caveman` plugin)
+4. `~/.config/caveman-docs/config.json` `defaultMode`
+5. `full`
+
+### Switching
+| Method | Example |
+|--------|---------|
+| Slash | `/caveman-docs ultimate` |
+| Env | `export CAVEMAN_DEFAULT_MODE=wenyan-ultimate` |
+| Config | `{"defaultMode":"ultra"}` in `~/.config/caveman-docs/config.json` |
 
 ## 5. References
 

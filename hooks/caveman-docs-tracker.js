@@ -1,44 +1,40 @@
 #!/usr/bin/env node
 // caveman-docs — UserPromptSubmit hook
-// Detects prompts requesting AI doc generation/update and injects caveman-docs compression context.
-// Does NOT activate for human-facing doc requests (Confluence, Jira, README, PR descriptions).
+// 1. Detects /caveman-docs <level> commands and updates the active-mode flag.
+// 2. Detects AI doc write intent and injects the caveman-docs compression reminder.
+// 3. Per-turn reinforcement when an aggressive level (ultra/ultimate/wenyan-ultra/wenyan-ultimate) is active.
 
 const fs = require('fs');
-const path = require('path');
-const os = require('os');
+const {
+  getDefaultMode,
+  getFlagPath,
+  safeWriteFlag,
+  readFlag,
+  clearFlag,
+  normalizeMode,
+  ULTIMATE_MODES,
+  ULTRA_CLASS,
+  ruleFragmentFor,
+  VALID_MODES
+} = require('./caveman-docs-config');
 
-const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-const flagPath = path.join(claudeDir, '.caveman-docs-active');
+const flagPath = getFlagPath();
 
-// --- AI doc write intent patterns ---
-// Match when user asks to write/generate/update AI-oriented docs
-
+// AI doc write-intent patterns
 const AI_DOC_WRITE_PATTERNS = [
-  // Explicit file names
   /\b(write|create|generate|update|refresh|add|make)\b.{0,40}\bAGENTS\.md\b/i,
   /\b(write|create|generate|update|refresh|add|make)\b.{0,40}\bCLAUDE\.md\b/i,
   /\b(write|create|generate|update|refresh|add|make)\b.{0,40}\bSKILL\.md\b/i,
   /\bdocs[/\\]agents\b.{0,40}\b(write|create|generate|update|add|make)\b/i,
   /\b(write|create|generate|update|add|make)\b.{0,40}\bdocs[/\\]agents\b/i,
-
-  // AI doc concepts
   /\b(write|create|generate|update|refresh|add|make)\b.{0,60}\b(ai.?context|agent.?context|agent.?docs?|agent.?documentation)\b/i,
   /\b(ai.?context|agent.?context|agent.?docs?)\b.{0,40}\b(write|create|generate|update|refresh)\b/i,
-
-  // Slash commands for AI context generation
   /\/(ai-context|caveman-docs|init)\b/i,
-
-  // "write docs" / "update docs" with AI agent signals nearby
   /\b(write|create|generate|update|refresh)\b.{0,30}\bdocs?\b.{0,60}\b(agent|claude|ai|autonomous|coding.?assistant)\b/i,
   /\b(agent|claude|ai|autonomous)\b.{0,40}\b(write|create|generate|update)\b.{0,30}\bdocs?\b/i,
-
-  // bootstrapping context
   /\bbootstrap\b.{0,40}\b(ai|agent|context|docs?)\b/i,
   /\b(onboard|bootstrap)\b.{0,40}\b(repo|repository|codebase)\b.{0,40}\b(ai|agent|claude)\b/i,
 ];
-
-// --- Human doc patterns (exempt) ---
-// If the prompt is clearly about Confluence, Jira, README, PRs — skip injection
 
 const HUMAN_DOC_PATTERNS = [
   /\b(confluence|jira|notion|wiki)\b/i,
@@ -51,23 +47,13 @@ const HUMAN_DOC_PATTERNS = [
   /\bnormal.?docs?\b/i,
 ];
 
-// --- Deactivation patterns ---
 const DEACTIVATE_PATTERNS = [
-  /\bstop.?caveman.?docs?\b/i,
-  /\bdisable.?caveman.?docs?\b/i,
+  /\bstop.?caveman.?-?docs?\b/i,
+  /\bdisable.?caveman.?-?docs?\b/i,
   /\bnormal.?docs?\b/i,
 ];
 
-function isFlagActive() {
-  try {
-    const st = fs.lstatSync(flagPath);
-    return st.isFile();
-  } catch (e) {
-    return true; // flag missing = not explicitly deactivated; still inject
-  }
-}
-
-const REMINDER =
+const REMINDER_BASE =
   'CAVEMAN-DOCS: Detected AI doc write intent. Apply compression rules to all AI doc files:\n' +
   '- No meta-prose (heading states topic, body delivers facts)\n' +
   '- Tables > lists (command+purpose, name+description, symptom+check)\n' +
@@ -83,29 +69,66 @@ process.stdin.on('data', chunk => { input += chunk; });
 process.stdin.on('end', () => {
   try {
     const data = JSON.parse(input);
-    const prompt = (data.prompt || '').trim();
+    const promptRaw = (data.prompt || '').trim();
+    const prompt = promptRaw.toLowerCase();
 
     if (!prompt) { process.exit(0); }
 
-    // Handle deactivation
+    // 1) /caveman-docs <level> — set active mode
+    //    Accepts: /caveman-docs, /caveman-docs lite|full|ultra|ultimate|wenyan|wenyan-lite|wenyan-ultra|wenyan-ultimate|off
+    const slashMatch = prompt.match(/^\/(?:caveman-docs|caveman-docs:caveman-docs)\b\s*(\S+)?/);
+    if (slashMatch) {
+      const arg = (slashMatch[1] || '').trim();
+      if (!arg) {
+        // Bare /caveman-docs — re-resolve mode from env/config and persist
+        const m = getDefaultMode();
+        if (m === 'off') clearFlag(flagPath);
+        else safeWriteFlag(flagPath, m);
+      } else {
+        const target = normalizeMode(arg);
+        if (target === 'off') {
+          clearFlag(flagPath);
+        } else if (target) {
+          safeWriteFlag(flagPath, target);
+        }
+        // Unknown arg: leave existing flag untouched
+      }
+      // Don't exit — still allow per-turn reminder below to fire on the new mode
+    }
+
+    // 2) Deactivation phrases
     if (DEACTIVATE_PATTERNS.some(p => p.test(prompt))) {
-      try { fs.unlinkSync(flagPath); } catch (e) {}
+      clearFlag(flagPath);
       process.exit(0);
     }
 
-    if (!isFlagActive()) { process.exit(0); }
+    // 3) Resolve current mode
+    const mode = readFlag(flagPath) || getDefaultMode();
+    if (mode === 'off') process.exit(0);
 
-    // Exempt if clearly about human-facing docs
-    if (HUMAN_DOC_PATTERNS.some(p => p.test(prompt))) {
-      process.exit(0);
-    }
+    // 4) Inject reminder when:
+    //    - AI doc write intent detected (and not human-doc context), OR
+    //    - aggressive mode active (ultra-class) — every turn keeps caveman pinned
+    const isAIDocIntent =
+      !HUMAN_DOC_PATTERNS.some(p => p.test(prompt)) &&
+      AI_DOC_WRITE_PATTERNS.some(p => p.test(prompt));
 
-    // Detect AI doc write intent
-    if (AI_DOC_WRITE_PATTERNS.some(p => p.test(prompt))) {
+    const aggressive = ULTRA_CLASS.has(mode);
+
+    if (isAIDocIntent || aggressive) {
+      const ultimateLine = ULTIMATE_MODES.has(mode)
+        ? '\nULTIMATE: also intercept ANY .md file written in this session (not only AI docs). Exempt: README.md, CHANGELOG.md, CONTRIBUTING.md.'
+        : '';
+
+      const additionalContext =
+        'CAVEMAN-DOCS ACTIVE (' + mode + '). ' + ruleFragmentFor(mode) +
+        (isAIDocIntent ? '\n\n' + REMINDER_BASE : '') +
+        ultimateLine;
+
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
           hookEventName: 'UserPromptSubmit',
-          additionalContext: REMINDER
+          additionalContext
         }
       }));
     }
