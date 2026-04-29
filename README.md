@@ -22,9 +22,46 @@ Compression applies whether the doc is written by a command, an agent, or direct
 
 | Command | Scope |
 |---------|-------|
+| `/caveman-docs <level>` | Switch intensity level (lite/full/ultra/ultimate/wenyan-*/off) |
 | `/caveman-docs:init <path>` | AGENTS.md + CLAUDE.md pair only |
 | `/caveman-docs:ai-context <path>` | Full tree: AGENTS.md + CLAUDE.md + docs/agents/*.md (8 files) |
 | `/caveman-docs:compress [--staged\|--unstaged\|--all]` | Find modified AI docs in working tree, compress in place |
+
+## Intensity levels
+
+Same compression mental model as upstream [caveman](https://github.com/JuliusBrussee/caveman), applied to the AI-documentation scope. Switch with `/caveman-docs <level>` or set a default with the `CAVEMAN_DEFAULT_MODE` (or `CAVEMAN_DOCS_DEFAULT_MODE`) environment variable.
+
+### Standard levels
+
+| Level | Trigger | Effect |
+|-------|---------|--------|
+| `lite` | `/caveman-docs lite` | Drop filler. Keep grammar. Professional but no fluff |
+| `full` | `/caveman-docs full` | Default. Drop articles, fragments OK, full grunt |
+| `ultra` | `/caveman-docs ultra` | Maximum compression. Telegraphic. Abbreviate everything |
+| `ultimate` | `/caveman-docs ultimate` | Same as `ultra` PLUS intercept ANY `.md` file written in the session, regardless of path or type |
+
+### 文言文 (Wenyan) levels
+
+Classical Chinese literary compression — same technical accuracy in the most token-efficient written language humans ever invented.
+
+| Level | Trigger | Effect |
+|-------|---------|--------|
+| `wenyan-lite` | `/caveman-docs wenyan-lite` | Semi-classical. Grammar intact, filler gone |
+| `wenyan` (or `wenyan-full`) | `/caveman-docs wenyan` | Full 文言文. Maximum classical terseness |
+| `wenyan-ultra` | `/caveman-docs wenyan-ultra` | Extreme. Ancient scholar on a budget |
+| `wenyan-ultimate` | `/caveman-docs wenyan-ultimate` | Same as `wenyan-ultra` PLUS intercept ANY `.md` file written in the session |
+
+### What `ultimate` / `wenyan-ultimate` do differently
+
+`ultra` and `wenyan-ultra` only compress AI-doc paths (AGENTS.md, CLAUDE.md, docs/agents/*.md, SKILL.md, etc.). The `ultimate` and `wenyan-ultimate` levels extend that interception to **every Markdown file** the agent writes — meeting notes, design docs, ad-hoc `.md` scratch files, anything ending in `.md` or `.markdown`. README.md, CHANGELOG.md, and CONTRIBUTING.md remain exempt in all modes. Non-Markdown files (`.ts`, `.py`, `.go`, etc.) are never touched.
+
+### Mode resolution order
+
+1. Flag file `~/.claude/.caveman-docs-active` (set by `/caveman-docs <level>`)
+2. `CAVEMAN_DOCS_DEFAULT_MODE` environment variable
+3. `CAVEMAN_DEFAULT_MODE` environment variable (shared with upstream `caveman` plugin)
+4. `~/.config/caveman-docs/config.json` `defaultMode` field
+5. `full` (default)
 
 ## Compression rules
 
